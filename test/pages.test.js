@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { chromium } from 'playwright-core';
 import { buildFigure } from '../src/build.js';
+import { CHIP_ANCHOR_MAX } from '../src/chip.js';
 import { toDocument, toGallery, toHtml } from '../src/html.js';
 import { values } from '../src/tokens.js';
 import { withFolder } from './helpers.js';
@@ -18,6 +19,9 @@ const GAP_TOLERANCE = 0.5;
 const AXIS_TOLERANCE = 1;
 const RING_WAIT_MS = 600;
 const SEMIBOLD = 600;
+const CHIP_FIGURES = ['test/fixtures/layout/chip-above-pill.muto', 'examples/memory.muto'];
+const CHIP_SAMPLES = 9;
+const CHIP_SHOWN_MIN = 0.1;
 const CAPTION = '단계 설명 글. 막대와 같은 가운데 축에 놓인다.';
 const CODE_FIGURE = 'flow right\nbox a "일반 `code` 글"\nbox b "B"\na -> b "보냄"\nstep "s"\n  a -> b';
 const BAR_FIGURE = 'chart bar\nx "정확도(%)"\nseries a "A"\nrow "항목" a=3\nrow "둘째" a=5';
@@ -126,5 +130,44 @@ describe('pages', { skip: SKIP }, () => {
       assert.equal(await frame.evaluate(() => document.readyState), 'complete');
       assert.ok(await frame.locator('svg').count() > 0, '자식 문서에 그림이 있다');
     });
+  });
+
+  // 근거: 이슈 #40, 설계 playback.md 요구사항 "점에서 CHIP_ANCHOR_MAX 안". 브라우저에 그려진 점 원과 글 상자의 getBoundingClientRect로 잰다
+  test('player_visible_chip_stays_within_the_anchor_distance_of_its_dot_as_drawn', async () => {
+    let shown = 0;
+    for (const file of CHIP_FIGURES) {
+      const result = await buildFigure(readFileSync(file, 'utf8'), { baseDir: 'examples' });
+      const html = await toHtml(result, 'chip');
+      await withFolder(async (folder) => {
+        writeFileSync(join(folder, 'page.html'), html);
+        const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 } });
+        for (const [i, seg] of result.timeline.segs.entries()) {
+          const hop = seg.hops.find((h) => h.data);
+          if (!hop) continue;
+          const first = result.timeline.segs.findIndex((s) => s.si === seg.si);
+          await page.clock.install({ time: 0 });
+          await page.goto(`file://${join(folder, 'page.html')}`);
+          await page.locator('[role=tab]').nth(seg.si).click();
+          let now = 0;
+          for (let k = 1; k <= CHIP_SAMPLES; k++) {
+            const at = seg.t0 - result.timeline.segs[first].t0 + (hop.ms * k) / (CHIP_SAMPLES + 1);
+            await page.clock.runFor(at - now);
+            now = at;
+            const drawn = await page.evaluate(() => {
+              const packet = [...document.querySelectorAll('.fl-packet')].find((g) => g.querySelector('rect'));
+              const dot = packet.querySelectorAll('circle')[1].getBoundingClientRect();
+              const box = packet.querySelector('rect').getBoundingClientRect();
+              const [cx, cy] = [dot.x + dot.width / 2, dot.y + dot.height / 2];
+              return { opacity: Number(packet.querySelector('rect').parentNode.style.opacity || 1), gap: Math.hypot(Math.max(box.x - cx, 0, cx - box.right), Math.max(box.y - cy, 0, cy - box.bottom)) };
+            });
+            if (drawn.opacity < CHIP_SHOWN_MIN) continue;
+            shown += 1;
+            assert.ok(drawn.gap <= CHIP_ANCHOR_MAX + GAP_TOLERANCE, `${file} seg${i} ${k}/${CHIP_SAMPLES}: 글 상자가 점에서 ${drawn.gap.toFixed(1)}px 떨어진다`);
+          }
+        }
+        await page.close();
+      });
+    }
+    assert.ok(shown > 10, `잰 표본 ${shown}개`);
   });
 });

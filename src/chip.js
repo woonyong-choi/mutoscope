@@ -12,10 +12,12 @@ export const CHIP_MARGIN = SPACE['14'];
 export const OVERLAP_SLACK = 0.5;
 // 잰 글 폭의 반올림 차이를 넘기 위한 여유
 const FIT_SLACK = 0.5;
+/** 보이는 글 상자 가장자리가 점에서 떨어질 수 있는 최대 거리. 이보다 멀어지는 자리는 쓰지 않고 그 구간은 흐리게 한다. */
+export const CHIP_ANCHOR_MAX = SPACE['22'];
 /** 글 상자가 도형, 글자, 알약, 다른 선, 그룹 틀에서 떨어져야 하는 최소 간격. 비켜 놓는 자리는 이만큼 띄운다. */
 export const CHIP_CLEAR = SPACE['2'];
-// 가리는 것을 비켜 올리거나 내리는 최대 거리
-const LIFT_MAX = CHIP_GAP * 4;
+// 가리는 것을 비켜 올리거나 내리는 최대 거리. 올린 자리가 CHIP_ANCHOR_MAX 안에 있게 정한다.
+const LIFT_MAX = CHIP_ANCHOR_MAX - CHIP_GAP;
 // 후보 선택 순서 가중치. 점 위 0, 올림 0.3, 점 아래 1, 옆으로 비킴 2(가까움)와 4(멂). 아래 줄의 옆 후보도 이 값에 더해 순서가 섞이지 않는다
 const ROW_LIFT = 0.3;
 const ROW_BELOW = 1;
@@ -53,10 +55,10 @@ export function overlapArea(a, b) {
  * 점 point 위의 글 상자 자리. 후보마다 아래 순서로 견주어 가장 나은 것을 쓴다.
  * 1. 그림 안에 있다. 2. 피할 사각형(글자, 도형 테두리, 선 라벨 알약)과 겹치지 않는다(겹치면 겹친 넓이가 작은 쪽). 3. 판 위아래 끝에서 CHIP_MARGIN 이상 떨어진다.
  * 4. 선택 순서는 점 위 그대로, 가리는 것을 비켜 조금 더 올린 자리, 선 반대쪽(점 아래)과 그것을 조금 더 내린 자리, 가리는 사각형의 양 끝에 붙게 옆으로 비킨 자리(점에서 글 상자 반 폭과 간격 안), 그보다 멀리 옆으로 비킨 자리다.
- * 멀리 비킨 자리는 글 상자가 점에서 떨어져 보이지만, 점이 노드 안에서 출발해 도형을 벗어날 때까지 글 상자를 선을 따라 노드 밖에 두어 점이 따라잡게 하는 마지막 수단이다. 그래도 겹치면 그림 검사(check.js)가 경고한다.
+ * 점에서 CHIP_ANCHOR_MAX보다 먼 자리는 후보로 남지만 chip-plan이 쓸 수 없는 자리로 보아 그 구간을 흐리게 한다. 가리면 그림 검사(check.js)가 경고한다.
  * 옆으로는 그림 밖으로 나가지 않게 밀어 넣는다. 가장자리 여백(CHIP_GAP)을 지킨 자리가 가리면 여백을 CHIP_CLEAR까지 줄인 자리를 쓴다. 가려지지 않는 자리가 여백보다 앞선다.
  * @param field { scene, avoid }. scene은 { width, height }, avoid는 { x, y, w, h, name }[]
- * @returns { dx, dy, box, isOutside, hits }. dx, dy는 점 위 기본 자리에서 옮긴 양, box는 그림 좌표의 글 상자 사각형이다. hits는 겹친 이름 목록이다
+ * @returns { dx, dy, box, gap, isOutside, hits }. dx, dy는 점 위 기본 자리에서 옮긴 양, box는 그림 좌표의 글 상자 사각형이다. hits는 겹친 이름 목록이다
  */
 export function placeChip(point, chip, field) {
   const best = chipCandidates(point, chip, field).reduce((a, b) => (compare(a.rank, b.rank) <= 0 ? a : b));
@@ -178,7 +180,7 @@ function candidateAt({ point, chip, scene, avoid, index }, { row, x, order: side
   const isTight = row.top < CHIP_MARGIN - FIT_SLACK || row.top + chip.h > scene.height - CHIP_MARGIN + FIT_SLACK;
   const isCrowded = Math.min(box.x, scene.width - box.x - box.w) < CHIP_GAP - FIT_SLACK;
   const order = row.order + sideOrder + (Math.abs(x - point.x) + Math.abs(row.dy)) * SHIFT_WEIGHT;
-  return { dx: x - point.x, dy: row.dy, box, isOutside, hits, rank: [Number(isOutside), area, nearArea, Number(isTight), Number(isCrowded), order], key: desc.key, desc };
+  return { dx: x - point.x, dy: row.dy, box, gap: gapToPoint(box, point), isOutside, hits, rank: [Number(isOutside), area, nearArea, Number(isTight), Number(isCrowded), order], key: desc.key, desc };
 }
 
 // cost: time O(m), heap O(h), stack O(1)
@@ -205,6 +207,11 @@ function overlapsOf({ box, padded }, avoid, ids) {
 function compare(a, b) {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
   return 0;
+}
+
+/** 점에서 사각형 가장자리까지 거리. 점이 사각형 안이면 0이다. */
+export function gapToPoint(box, point) {
+  return Math.hypot(Math.max(box.x - point.x, 0, point.x - box.x - box.w), Math.max(box.y - point.y, 0, point.y - box.y - box.h));
 }
 
 /** 사각형이 그림 밖으로 나가는지(잰 글 폭의 반올림 차이는 넘긴다) */

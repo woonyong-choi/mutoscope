@@ -103,7 +103,7 @@ table.f2 -> phys.fr3
 step "조회" "페이지 1은 표의 둘째 행을 거쳐 프레임 7로 간다"
   virt.p1 -> table.p1 "페이지 1"
   light table.f1
-  table.f1 -> phys.fr7 "프레임 7"
+  table.f1 -> phys.fr7 "7"
   light phys.fr7
 ```
 

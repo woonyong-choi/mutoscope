@@ -1,5 +1,5 @@
 // 이동 하나의 글 상자 계획. 자리 바꿈을 가장 적게 하고, 꼭 바꿔야 하면 짧게 미끄러지고, 그것도 안 되면 그 구간만 흐리게 한다(docs/design/playback.md 이동 글).
-import { CHIP_GAP, chipCandidateAt, chipCandidates, descOf, sizeChip } from './chip.js';
+import { CHIP_ANCHOR_MAX, chipCandidateAt, chipCandidates, descOf, sizeChip } from './chip.js';
 import { gridOf } from './chip-grid.js';
 import { issuesOf, settle, simplify } from './chip-fade.js';
 import { dotAt, MOVE, NODE_MS } from './chip-motion.js';
@@ -10,9 +10,7 @@ import { flattenRoute } from './route.js';
 export { CHIP_FRAME_MS, CHIP_VISIBLE_MIN, chipStateAt } from './chip-motion.js';
 export { CHIP_STEP_MAX } from './chip-slide.js';
 
-// 글 상자와 점 사이가 이보다 멀면 떨어졌다고 본다(가리는 것을 비켜 올린 최대 거리까지는 붙은 것이다)
-const DETACH_GAP = CHIP_GAP * 2 + CHIP_GAP * 4;
-// 비용 가중치. 겹침 > 자리 바꿈 > 떨어짐(DETACH_GAP을 넘은 px마다) > 가까운 선(넓이마다) > 위아래 끝 여백 > 선택 순서 순으로 크다. 바꿈 한 번이 지점 수백 개의 작은 비용 합보다 크다
+// 비용 가중치. 겹침과 떨어짐(CHIP_ANCHOR_MAX를 넘음, 흐려지는 자리) > 자리 바꿈 > 떨어진 px > 가까운 선(넓이마다) > 위아래 끝 여백 > 선택 순서 순으로 크다. 바꿈 한 번이 지점 수백 개의 작은 비용 합보다 크다
 const UNCLEAN_COST = 1e7;
 const DETACH_COST_PER_PX = 2e4;
 const NEAR_COST = 300;
@@ -99,7 +97,7 @@ function usefulDescs(ctx, times) {
     const found = new Map();
     for (const c of chipCandidates(dotAt(ctx, t), ctx.chip, { scene: ctx.scene, avoid: ctx.field, isWide: true, index: ctx.index })) {
       found.set(c.key, c);
-      if (!c.isOutside && c.hits.length === 0) descs.set(c.key, c.desc);
+      if (isUsable(c)) descs.set(c.key, c.desc);
     }
     return found;
   });
@@ -119,20 +117,25 @@ function slotsAt(ctx, t, { descs, known }) {
     const c = known.get(key) ?? chipCandidateAt(point, ctx.chip, { scene: ctx.scene, avoid: ctx.field, desc, index: ctx.index });
     // c는 이 이동 계획만 쓰는 후보라 그대로 고쳐 쓴다.
     c.point = point;
-    c.cost = unaryCost(c, point);
-    c.isClean = !c.isOutside && c.hits.length === 0;
+    c.cost = unaryCost(c);
+    c.isClean = isUsable(c);
     slots.set(key, c);
   });
   return slots;
 }
 
+// 후보를 보이게 쓸 수 있는지: 그림 안이고, 가리는 것이 없고, 점에서 CHIP_ANCHOR_MAX 안이다. 아니면 그 구간은 흐려진다.
+function isUsable({ isOutside, hits, gap }) {
+  return !isOutside && hits.length === 0 && gap <= CHIP_ANCHOR_MAX;
+}
+
 // cost: time O(1), heap O(1), stack O(1)
 // basis: estimate
-// 후보 하나의 한 지점 비용. 겹침이나 그림 밖은 흐려져야 하므로 가장 크다.
-function unaryCost({ rank: [, area, near, tight, crowded, order], box, isOutside, hits }, point) {
-  const unclean = isOutside || hits.length ? UNCLEAN_COST + area : 0;
-  const gap = Math.hypot(Math.max(box.x - point.x, 0, point.x - box.x - box.w), Math.max(box.y - point.y, 0, point.y - box.y - box.h));
-  return unclean + near * NEAR_COST + (tight + crowded) * MARGIN_COST + order * ORDER_COST + Math.max(0, gap - DETACH_GAP) * DETACH_COST_PER_PX;
+// 후보 하나의 한 지점 비용. 흐려져야 하는 자리(겹침, 그림 밖, 점에서 멂)는 가장 크고, 그 안에서는 점에 가까운 자리가 앞선다.
+function unaryCost(candidate) {
+  const { rank: [, area, near, tight, crowded, order], gap } = candidate;
+  const unclean = isUsable(candidate) ? 0 : UNCLEAN_COST + area + Math.max(0, gap - CHIP_ANCHOR_MAX) * DETACH_COST_PER_PX;
+  return unclean + near * NEAR_COST + (tight + crowded) * MARGIN_COST + order * ORDER_COST;
 }
 
 // cost: time O(n·k), heap O(n), stack O(1)

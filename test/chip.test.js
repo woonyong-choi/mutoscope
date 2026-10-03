@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { buildFigure } from '../src/build.js';
 import { flattenRoute } from '../src/route.js';
-import { CHIP_CLEAR, CHIP_GAP, CHIP_MARGIN, placeChip, sizeChip } from '../src/chip.js';
+import { CHIP_ANCHOR_MAX, CHIP_CLEAR, CHIP_GAP, CHIP_MARGIN, gapToPoint, placeChip, sizeChip } from '../src/chip.js';
 import { CHIP_FRAME_MS, CHIP_STEP_MAX, CHIP_VISIBLE_MIN, chipStateAt, planChip } from '../src/chip-plan.js';
 import { chipObstacles } from '../src/draw/boxes.js';
 import { toHtml } from '../src/html.js';
@@ -125,8 +125,8 @@ async function chipFigures() {
   return figures;
 }
 
-// 근거: 설계 playback.md 요구사항 "60fps 프레임마다 보이는 동안 이름, 열, 그룹 제목, 알약을 가리지 않고 그림 안에 있다. 한 프레임에 CHIP_STEP_MAX 넘게 더 움직이지 않는다". 버그 #20, #4 증상 3
-test('buildFigure_every_example_and_demo_chip_stays_inside_clear_and_never_jumps_in_any_60fps_frame', async () => {
+// 근거: 설계 playback.md 요구사항 "60fps 프레임마다 보이는 동안 이름, 열, 그룹 제목, 알약을 가리지 않고 그림 안에 있고 점에서 CHIP_ANCHOR_MAX 안이다. 한 프레임에 CHIP_STEP_MAX 넘게 더 움직이지 않는다". 버그 #20, #4 증상 3
+test('buildFigure_every_example_and_demo_chip_stays_inside_clear_near_its_dot_and_never_jumps_in_any_60fps_frame', async () => {
   let frames = 0;
   for (const { file, scene, hops } of await chipFigures()) {
     const names = chipObstacles(scene);
@@ -139,6 +139,8 @@ test('buildFigure_every_example_and_demo_chip_stays_inside_clear_and_never_jumps
         const hit = names.find((name) => overlaps(box, name));
         assert.ok(!isVisible || !hit, `${file}: ${Math.round(t)}ms에 이동 글 상자가 ${hit?.name}을 가린다`);
         assert.ok(!isVisible || (box.x >= -0.5 && box.y >= -0.5 && box.x + box.w <= scene.width + 0.5 && box.y + box.h <= scene.height + 0.5), `${file}: ${Math.round(t)}ms에 판 밖`);
+        const gap = gapToPoint(box, point);
+        assert.ok(!isVisible || gap <= CHIP_ANCHOR_MAX + 0.5, `${file}: ${Math.round(t)}ms에 글 상자가 점에서 ${gap.toFixed(1)}px 떨어진다`);
         const center = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
         if (before) {
           const extra = Math.hypot(center.x - before.center.x, center.y - before.center.y) - Math.hypot(point.x - before.point.x, point.y - before.point.y);

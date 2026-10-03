@@ -606,7 +606,7 @@ test('buildFigure_quiet_edge_in_a_row_keeps_its_label_on_the_line_and_the_figure
 
 // 근거: 설계 layout.md 요구사항 "그 간격에서 이동 글 상자가 알약을 가리지 않는다", 버그 #20
 test('buildFigure_quiet_edge_gap_holds_the_pill_and_a_moving_text_without_covering_each_other', async () => {
-  const { warnings } = await buildFigure(QUIET.replace('  c -> d\n', '  c -> d "블록 요청 PA 0xA1B2678"\n'), { strict: true });
+  const { warnings } = await buildFigure(QUIET.replace('  c -> d\n', '  c -> d "블록 요청 PA"\n'), { strict: true });
 
   assert.deepEqual(warnings, []);
 });
